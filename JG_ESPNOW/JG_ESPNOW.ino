@@ -27,7 +27,7 @@
 
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
-#include "lvgl.h"
+#include <lvgl.h>
 #include <Encoder.h>
 #include <Bounce2.h>
 #include "esp_heap_caps.h"

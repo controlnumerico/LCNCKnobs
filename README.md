@@ -16,3 +16,28 @@
 
 9.- 
 
+1. Averigua por qué se desconecta
+Abre una terminal, ejecuta sudo dmesg -w y espera a que se caiga. Si ves “USB disconnect”, suele ser cable, alimentación o ruido. Si ves “suspend” o “reset”, es manejo de energía.
+
+2. Desactiva el autosuspend de USB
+Ubuntu apaga puertos USB para ahorrar energía, y eso puede desconectar un dispositivo serial. Para probar de inmediato:
+
+echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend
+
+Para dejarlo permanente, edita /etc/default/grub, agrega usbcore.autosuspend=-1 a GRUB_CMDLINE_LINUX_DEFAULT y ejecuta sudo update-grub. Después reinicia.
+
+3. Evita que ModemManager y brltty se adueñen del puerto
+Pueden tomar el puerto serial del ESP32 y causar desconexiones o bloqueos:
+
+sudo systemctl disable --now ModemManager
+sudo apt remove brltty
+
+4. Nombre fijo para el puerto
+A veces el puerto cambia de ttyACM0 a ttyACM1 al reconectar. Crea una regla udev, por ejemplo /etc/udev/rules.d/99-puente.rules:
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", SYMLINK+="puente_knobs"
+
+303a es el identificador de Espressif; confírmalo con lsusb. Con eso tendrás /dev/puente_knobs, que siempre apunta al puente, y lo usas en knobs_serial.py. Tu usuario debe estar en el grupo dialout: sudo usermod -aG dialout $USER.
+
+
+

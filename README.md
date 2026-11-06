@@ -6,3 +6,5 @@
 
 4.- Tools -- Partition Scheme -- Huge
 
+5.- Run PUENTE_ESPNOW.ino and get MAC Address using serial console,   Change BRIDGE_MAC[6] on each Knob file
+

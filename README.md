@@ -14,3 +14,5 @@
 
 8.- Check Path in knobs_espnow.hal--  loadusr -Wn knobs python3 /home/cnc/linuxcnc/configs/sim.axis/knobs_serial.py
 
+9.- 
+

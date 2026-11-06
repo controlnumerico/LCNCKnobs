@@ -1,0 +1,60 @@
+# Agregar a tu archivo POSTGUI_HALFILE (se carga despues de halui)
+# Ajusta la ruta de knobs_serial.py
+
+loadusr -Wn knobs python3 /home/USUARIO/linuxcnc/configs/MI_MAQUINA/knobs_serial.py
+
+# ---- FEED RATE ----
+setp halui.feed-override.count-enable 1
+setp halui.feed-override.direct-value 0
+setp halui.feed-override.scale 0.01
+
+net knob-feed-counts knobs.feed.counts => halui.feed-override.counts
+net knob-feed-reset  knobs.feed.reset  => halui.feed-override.reset
+net knob-feed-value  halui.feed-override.value => knobs.feed.value
+
+# ---- SPINDLE SPEED (override 0-200 %) ----
+# Verifica los nombres con:  halcmd show pin halui.spindle
+# (LinuxCNC 2.8 o mas nuevo: halui.spindle.0.override.*)
+# En el INI, seccion [DISPLAY]: MAX_SPINDLE_OVERRIDE = 2 (y MIN_SPINDLE_OVERRIDE = 0 si quieres llegar a 0 %)
+# (por defecto: minimo 0.5 = 50 % y maximo 1.0 = 100 %)
+setp halui.spindle.0.override.count-enable 1
+setp halui.spindle.0.override.direct-value 0
+setp halui.spindle.0.override.scale 0.01
+
+net knob-spindle-counts knobs.spindle.counts => halui.spindle.0.override.counts
+net knob-spindle-reset  knobs.spindle.reset  => halui.spindle.0.override.reset
+net knob-spindle-value  halui.spindle.0.override.value => knobs.spindle.value
+
+# ---- RAPID OVERRIDE (0-100 %) ----
+# Verifica los nombres con:  halcmd show pin halui.rapid-override
+# El maximo del rapid override en LinuxCNC es 100 %, no hace falta tocar el INI.
+# Si tu version NO tiene el pin halui.rapid-override.reset, borra la linea "knob-rapid-reset"
+# (el boton de la perilla no hara nada, el resto funciona igual).
+setp halui.rapid-override.count-enable 1
+setp halui.rapid-override.direct-value 0
+setp halui.rapid-override.scale 0.01
+
+net knob-rapid-counts knobs.rapid.counts => halui.rapid-override.counts
+net knob-rapid-reset  knobs.rapid.reset  => halui.rapid-override.reset
+net knob-rapid-value  halui.rapid-override.value => knobs.rapid.value
+
+# ---- MAX VELOCITY (0-3200 unidades/min, pasos de 160) ----
+# Verifica los nombres con:  halcmd show pin halui.max-velocity
+# halui.max-velocity.value esta en unidades de maquina por SEGUNDO.
+# La perilla manda cuentas en unidades/min (160 por clic), asi que scale = 1/60.
+# No existe halui.max-velocity.reset: el boton de esta perilla no hace nada.
+# En el INI, [TRAJ] MAX_LINEAR_VELOCITY = 53.333 (3200/60) para que el tope real sea 3200.
+setp halui.max-velocity.count-enable 1
+setp halui.max-velocity.direct-value 0
+setp halui.max-velocity.scale 0.016666667
+
+net knob-vmax-counts knobs.vmax.counts => halui.max-velocity.counts
+net knob-vmax-value  halui.max-velocity.value => knobs.vmax.value
+
+# ---- JOG SPEED (0-3200 unidades/min, pasos de 160) ----
+# halui no tiene pin de cuentas para jog-speed, asi que knobs_serial.py guarda el valor
+# y lo entrega en knobs.jog.speed (unidades de maquina por SEGUNDO). El mismo
+# signal regresa a knobs.jog.value para mostrarlo en la perilla.
+# Verifica los pines con:  halcmd show pin halui | grep jog-speed
+# Si tu version no tiene halui.axis.jog-speed (o halui.joint.jog-speed), borra ese nombre de la linea.
+net knob-jog-speed knobs.jog.speed => halui.axis.jog-speed halui.joint.jog-speed knobs.jog.value

@@ -13,16 +13,32 @@ Pines HAL por perilla (rol FEED => knobs.feed.*):
   .value      float in   valor actual (1.0 = 100%)
   .conectado  bit   out  la perilla esta enviando latidos
 
+Reconexion USB:
+  Si el puente se desconecta (cable, ruido, suspension), el script cierra el
+  puerto, busca el puente otra vez y reabre solo. Al reconectar reenvia de
+  inmediato el valor de todas las perillas.
+
 Requisitos:
   sudo apt install python3-serial
   sudo usermod -aG dialout $USER      (cerrar sesion y volver a entrar)
 """
+import glob
 import hal
+import os
 import serial
+import sys
 import time
 
-# Mejor usar la ruta fija: ls /dev/serial/by-id/
-PUERTO_SERIAL = "/dev/ttyACM0"
+# --- Puerto serial ---------------------------------------------------------
+# Si PUERTO_SERIAL tiene un valor (por ejemplo una regla udev como
+# "/dev/puente_knobs" o una ruta de /dev/serial/by-id/), se usa esa ruta.
+# Si queda vacio, se busca automaticamente un dispositivo Espressif en
+# /dev/serial/by-id/ cada vez que se intenta conectar, asi no importa si el
+# sistema lo renombra de ttyACM0 a ttyACM1 al reconectar.
+PUERTO_SERIAL = ""
+PUERTO_RESPALDO = "/dev/ttyACM0"   # solo si no se encuentra nada por by-id
+PATRON_BY_ID = "/dev/serial/by-id/*Espressif*"
+
 BAUD = 115200
 ROLES = ["FEED", "SPINDLE", "RAPID", "VMAX", "JOG"]
 
@@ -40,6 +56,10 @@ LIMITE_ABS = (0, 3200)         # unidades/min
 
 TIMEOUT_PERILLA = 3.0   # s sin latidos => .conectado = 0
 REENVIO = 1.0           # s: se repite el valor aunque no cambie
+ESPERA_REINTENTO = 1.0  # s entre intentos de reconexion
+
+# Errores que indican que el puerto se cayo o se desconecto
+ERRORES_PUERTO = (serial.SerialException, OSError, ValueError)
 
 h = hal.component("knobs")
 
@@ -69,15 +89,53 @@ perillas = {rol: Perilla(rol) for rol in ROLES}
 h.ready()
 
 
+def log(texto):
+    print("[knobs] " + texto)
+    sys.stdout.flush()
+
+
+def buscar_puerto():
+    """Devuelve la ruta del puerto del puente, o None si no esta conectado."""
+    if PUERTO_SERIAL:
+        return PUERTO_SERIAL if os.path.exists(PUERTO_SERIAL) else None
+    encontrados = sorted(glob.glob(PATRON_BY_ID))
+    if encontrados:
+        return encontrados[0]
+    if os.path.exists(PUERTO_RESPALDO):
+        return PUERTO_RESPALDO
+    return None
+
+
 def abrir():
+    puerto = buscar_puerto()
+    if puerto is None:
+        raise serial.SerialException("puente no encontrado")
     s = serial.Serial()
-    s.port = PUERTO_SERIAL
+    s.port = puerto
     s.baudrate = BAUD
     s.timeout = 0.02
+    s.write_timeout = 1.0     # evita que una escritura se quede colgada
     s.dtr = False
     s.rts = False
     s.open()
+    log("conectado a " + puerto)
     return s
+
+
+def cerrar(s):
+    """Cierra el puerto sin que un error al cerrar tire el componente."""
+    try:
+        s.close()
+    except Exception:
+        pass
+
+
+def desconectado():
+    """Marca todas las perillas como desconectadas y fuerza reenvio al volver."""
+    for p in perillas.values():
+        p.visto = 0.0
+        p.ultimo = None
+        p.conectado.set(0)
 
 
 def procesar(linea):
@@ -127,19 +185,27 @@ try:
             try:
                 ser = abrir()
                 buf = b""
-            except (serial.SerialException, OSError):
-                time.sleep(1.0)
+                # Forzar reenvio inmediato del valor de cada perilla
+                for p in perillas.values():
+                    p.ultimo = None
+            except ERRORES_PUERTO:
+                time.sleep(ESPERA_REINTENTO)
                 continue
 
         # Leer lineas del puente
         try:
             datos = ser.read(ser.in_waiting or 1)
-        except (serial.SerialException, OSError):
-            ser.close()
+        except ERRORES_PUERTO:
+            log("puente desconectado, reintentando...")
+            cerrar(ser)
             ser = None
+            desconectado()
             continue
 
         buf += datos
+        # Proteccion: si llega basura sin saltos de linea, no crecer sin limite
+        if len(buf) > 4096:
+            buf = b""
         while b"\n" in buf:
             linea, buf = buf.split(b"\n", 1)
             procesar(linea.decode("ascii", "ignore"))
@@ -152,8 +218,14 @@ try:
                     ser.write(("%s V%d\n" % (p.rol, v)).encode())
                     p.ultimo = v
                     p.t_envio = ahora
-        except (serial.SerialException, OSError):
-            ser.close()
+        except ERRORES_PUERTO:
+            log("error al escribir, reintentando...")
+            cerrar(ser)
             ser = None
+            desconectado()
 except KeyboardInterrupt:
+    pass
+finally:
+    if ser is not None:
+        cerrar(ser)
     raise SystemExit

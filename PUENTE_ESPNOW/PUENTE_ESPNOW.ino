@@ -18,6 +18,11 @@
     - Si usas el puerto USB nativo: Tools > USB CDC On Boot > Enabled.
     - Si usas el puerto UART (CH340/CP210x), dejalo como esta.
     - No imprimir nada mas por Serial: la PC interpreta cada linea.
+
+  LED RGB de la placa:
+    - ROJO  = LinuxCNC no conectado (la PC no manda lineas validas)
+    - VERDE = LinuxCNC conectado (knobs_serial.py manda el valor cada 1 s)
+    - Se considera desconectado si pasan TIMEOUT_PC_MS sin lineas de la PC.
 */
 
 #include <Arduino.h>
@@ -28,6 +33,16 @@
 const uint8_t CANAL = 1;   // mismo canal que las perillas
 const uint8_t BCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+// LED RGB integrado (WS2812). Si no se ilumina, probar con 38 en vez de 48
+// (algunas versiones de la placa DevKitC-1 usan GPIO38).
+#ifdef RGB_BUILTIN
+  #define PIN_RGB RGB_BUILTIN
+#else
+  #define PIN_RGB 48
+#endif
+const uint8_t BRILLO = 20;                 // 0-255 (255 es muy brillante)
+const uint32_t TIMEOUT_PC_MS = 3000;       // sin lineas de la PC => desconectado
+
 // Cola: callback ESP-NOW (tarea WiFi) -> loop
 static const int COLA_N = 32;
 static const int LINEA_MAX = 40;
@@ -35,7 +50,22 @@ static char cola[COLA_N][LINEA_MAX];
 static volatile int colaIn = 0;
 static volatile int colaOut = 0;
 
-bool pcActiva = false;          // true cuando la PC ya mando algo
+bool pcActiva = false;          // true mientras la PC siga mandando lineas
+bool pcVista = false;           // true si la PC mando al menos una linea
+uint32_t ultimoPc = 0;          // millis() de la ultima linea valida de la PC
+
+void ponerRGB(bool conectado) {
+  if (conectado) neopixelWrite(PIN_RGB, 0, BRILLO, 0);   // verde
+  else           neopixelWrite(PIN_RGB, BRILLO, 0, 0);   // rojo
+}
+
+void actualizarEstadoPc() {
+  bool activa = pcVista && (millis() - ultimoPc < TIMEOUT_PC_MS);
+  if (activa != pcActiva) {
+    pcActiva = activa;
+    ponerRGB(pcActiva);
+  }
+}
 uint32_t ultimoMac = 0;
 
 void imprimirMac() {
@@ -92,7 +122,8 @@ void procesarLineaPC(char *lin) {
   int n = snprintf(out, sizeof(out), "KN|%s|%s", lin, sp + 1);
   if (n > 0 && n < (int)sizeof(out)) {
     esp_now_send(BCAST, (const uint8_t *)out, n);
-    pcActiva = true;
+    pcVista = true;
+    ultimoPc = millis();
   }
 }
 
@@ -113,6 +144,7 @@ void leerSerial() {
 }
 
 void setup() {
+  ponerRGB(false);                 // rojo hasta que LinuxCNC se conecte
   Serial.begin(115200);
   delay(1000);
 
@@ -145,6 +177,9 @@ void loop() {
 
   // Mensajes de la PC hacia las perillas
   leerSerial();
+
+  // LED verde/rojo segun haya o no datos de LinuxCNC
+  actualizarEstadoPc();
 
   // Mientras la PC no se conecte, repetir la MAC cada 5 s
   if (!pcActiva && millis() - ultimoMac > 5000) {

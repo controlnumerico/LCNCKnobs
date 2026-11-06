@@ -2,11 +2,11 @@
 
 2.- Use lvgl by Kisvegabor 8.4.0
 
-3.- Select ESP32C3 Dev Module
+3.- Select "ESP32C3 Dev Module"
 
 4.- Tools -- Partition Scheme -- Huge
 
-5.- Run PUENTE_ESPNOW.ino and get MAC Address using serial console,   Change BRIDGE_MAC[6] on each Knob file PUENTE is a ESP32S3 Dev Module
+5.- Run PUENTE_ESPNOW.ino and get MAC Address using serial console,   Change BRIDGE_MAC[6] on each Knob file PUENTE is a "ESP32S3 Dev Module"
 
 6.- Copy files:  knobs_espnow.hal and knobs_serial.py  to linuxcnc config directory
 

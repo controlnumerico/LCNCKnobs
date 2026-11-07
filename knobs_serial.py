@@ -19,6 +19,9 @@ Teclado matricial 4x4 (modulo KEYPAD_ESPNOW, rol KEYS):
     knobs.io.key-00 ... knobs.io.key-15   bit out  1 mientras la tecla esta presionada
     knobs.io.conectado                    bit out  el modulo esta enviando
   Si el modulo deja de enviar, las teclas se sueltan solas (no quedan pegadas).
+  Entrada u32 desde el modulo (ActiveTool):
+    knobs.io.in-0                         u32 out  valor de ActiveTool
+  modulo -> PC:  KEYS T<n>      ActiveTool en decimal
   Salidas hacia el modulo (2 valores u32 desde LinuxCNC):
     knobs.io.out-0, knobs.io.out-1        u32 in   se mandan al modulo
   PC -> modulo:  KEYS O<a>,<b>   al cambiar y cada REENVIO segundos
@@ -106,6 +109,7 @@ class Teclado:
         self.conectado = h.newpin("io.conectado", hal.HAL_BIT, hal.HAL_OUT)
         self.out = [h.newpin("io.out-%d" % i, hal.HAL_U32, hal.HAL_IN)
                     for i in range(2)]
+        self.tool = h.newpin("io.in-0", hal.HAL_U32, hal.HAL_OUT)   # ActiveTool
         self.mascara = 0
         self.visto = 0.0
         self.ultimo = None
@@ -181,6 +185,11 @@ def procesar_teclado(partes):
     if msg[0] == "K":
         try:
             teclado.poner(int(msg[1:], 16) & 0xFFFF)
+        except ValueError:
+            return
+    elif msg[0] == "T":
+        try:
+            teclado.tool.set(int(msg[1:]) & 0xFFFFFFFF)
         except ValueError:
             return
     # "H" (latido) solo actualiza teclado.visto

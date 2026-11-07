@@ -1,7 +1,7 @@
 # Agregar a tu archivo POSTGUI_HALFILE (se carga despues de halui)
 # Ajusta la ruta de knobs_serial.py
 
-loadusr -Wn knobs python3 /home/USUARIO/linuxcnc/configs/MI_MAQUINA/knobs_serial.py
+loadusr -Wn knobs python3 /home/cnc/linuxcnc/configs/sim.axis/knobs_serial.py
 
 # ---- FEED RATE ----
 setp halui.feed-override.count-enable 1

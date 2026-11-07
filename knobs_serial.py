@@ -13,6 +13,16 @@ Pines HAL por perilla (rol FEED => knobs.feed.*):
   .value      float in   valor actual (1.0 = 100%)
   .conectado  bit   out  la perilla esta enviando latidos
 
+Teclado matricial 4x4 (modulo KEYPAD_ESPNOW, rol KEYS):
+  modulo -> PC:  KEYS K<hhhh>   estado de las 16 teclas en hexadecimal
+  Pines HAL:
+    knobs.io.key-00 ... knobs.io.key-15   bit out  1 mientras la tecla esta presionada
+    knobs.io.conectado                    bit out  el modulo esta enviando
+  Si el modulo deja de enviar, las teclas se sueltan solas (no quedan pegadas).
+  Salidas hacia el modulo (2 valores u32 desde LinuxCNC):
+    knobs.io.out-0, knobs.io.out-1        u32 in   se mandan al modulo
+  PC -> modulo:  KEYS O<a>,<b>   al cambiar y cada REENVIO segundos
+
 Reconexion USB:
   Si el puente se desconecta (cable, ruido, suspension), el script cierra el
   puerto, busca el puente otra vez y reabre solo. Al reconectar reenvia de
@@ -85,7 +95,30 @@ class Perilla:
         self.t_envio = 0.0
 
 
+class Teclado:
+    """Modulo de entradas con teclado matricial 4x4 (rol KEYS)."""
+    ROL = "KEYS"
+    N = 16
+
+    def __init__(self):
+        self.teclas = [h.newpin("io.key-%02d" % i, hal.HAL_BIT, hal.HAL_OUT)
+                       for i in range(self.N)]
+        self.conectado = h.newpin("io.conectado", hal.HAL_BIT, hal.HAL_OUT)
+        self.out = [h.newpin("io.out-%d" % i, hal.HAL_U32, hal.HAL_IN)
+                    for i in range(2)]
+        self.mascara = 0
+        self.visto = 0.0
+        self.ultimo = None
+        self.t_envio = 0.0
+
+    def poner(self, mascara):
+        self.mascara = mascara
+        for i in range(self.N):
+            self.teclas[i].set(bool((mascara >> i) & 1))
+
+
 perillas = {rol: Perilla(rol) for rol in ROLES}
+teclado = Teclado()
 h.ready()
 
 
@@ -136,11 +169,29 @@ def desconectado():
         p.visto = 0.0
         p.ultimo = None
         p.conectado.set(0)
+    teclado.visto = 0.0
+    teclado.ultimo = None
+    teclado.conectado.set(0)
+    teclado.poner(0)
+
+
+def procesar_teclado(partes):
+    teclado.visto = time.time()
+    msg = partes[1]
+    if msg[0] == "K":
+        try:
+            teclado.poner(int(msg[1:], 16) & 0xFFFF)
+        except ValueError:
+            return
+    # "H" (latido) solo actualiza teclado.visto
 
 
 def procesar(linea):
     partes = linea.split()
     if len(partes) < 2:
+        return
+    if partes[0].upper() == Teclado.ROL:
+        procesar_teclado(partes)
         return
     p = perillas.get(partes[0].upper())
     if p is None:
@@ -179,6 +230,10 @@ try:
             if p.reset.get() and ahora > p.reset_hasta:
                 p.reset.set(0)
             p.conectado.set(ahora - p.visto < TIMEOUT_PERILLA)
+        teclado_vivo = ahora - teclado.visto < TIMEOUT_PERILLA
+        teclado.conectado.set(teclado_vivo)
+        if not teclado_vivo and teclado.mascara:
+            teclado.poner(0)    # el modulo callo: soltar todas las teclas
 
         # (Re)abrir el puerto serial
         if ser is None:
@@ -186,6 +241,7 @@ try:
                 ser = abrir()
                 buf = b""
                 # Forzar reenvio inmediato del valor de cada perilla
+                teclado.ultimo = None
                 for p in perillas.values():
                     p.ultimo = None
             except ERRORES_PUERTO:
@@ -218,6 +274,12 @@ try:
                     ser.write(("%s V%d\n" % (p.rol, v)).encode())
                     p.ultimo = v
                     p.t_envio = ahora
+            # Salidas u32 hacia el modulo KEYPAD: "KEYS O<a>,<b>"
+            vs = tuple(int(o.get()) & 0xFFFFFFFF for o in teclado.out)
+            if vs != teclado.ultimo or ahora - teclado.t_envio > REENVIO:
+                ser.write(("KEYS O%d,%d\n" % vs).encode())
+                teclado.ultimo = vs
+                teclado.t_envio = ahora
         except ERRORES_PUERTO:
             log("error al escribir, reintentando...")
             cerrar(ser)
